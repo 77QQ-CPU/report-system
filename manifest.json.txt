@@ -1,8 +1,0 @@
-{
-  "name": "报单系统",
-  "short_name": "报单",
-  "start_url": ".",
-  "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#000000"
-}
