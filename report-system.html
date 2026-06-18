@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>报单系统（云端版）</title>
+
+<!-- 📱 PWA -->
+<link rel="manifest" href="manifest.json">
+
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+body{
+  font-family: Arial;
+  padding:12px;
+  background:#f5f5f5;
+}
+
+textarea,input{
+  width:100%;
+  padding:8px;
+  margin:5px 0;
+  box-sizing:border-box;
+}
+
+button{
+  padding:6px 10px;
+  margin:3px;
+  cursor:pointer;
+}
+
+.card{
+  background:#fff;
+  padding:10px;
+  margin-top:10px;
+  border-radius:6px;
+}
+
+.row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  background:#eee;
+  padding:6px;
+  margin-bottom:6px;
+}
+</style>
+</head>
+
+<body>
+
+<h3>🌐 报单系统（云端 + App版）</h3>
+
+<textarea id="input" style="height:160px;"></textarea>
+
+<button onclick="add()">生成报单</button>
+<button onclick="resetInput()">恢复模板</button>
+<button onclick="clearData()">清空云端数据</button>
+
+<input id="searchAccount" placeholder="按账号搜索" oninput="render()" />
+<input id="searchShow" placeholder="按演出团体搜索" oninput="render()" />
+
+<div id="result"></div>
+
+<script>
+
+/* =======================
+   🔥 Supabase连接（必须改这里）
+======================= */
+const supabaseUrl = "https://lsgmzfzjgznqfrhsysqz.supabase.co";
+const supabaseKey = "sb_publishable_FuGju8BffoCYh-egg43MXQ_2llu_CRT";
+
+const client = supabase.createClient(supabaseUrl, supabaseKey);
+
+
+/* =======================
+   📥 模板
+======================= */
+function resetInput(){
+  document.getElementById("input").value =
+`演出团体：
+账户：
+交付日期：
+cxy：`;
+}
+resetInput();
+
+
+/* =======================
+   🧠 解析
+======================= */
+function parse(text){
+
+  let data = {
+    show:"",
+    account:"",
+    delivery_date:"",
+    cxy:""
+  };
+
+  text.split("\n").forEach(line=>{
+    let idx = line.indexOf("：");
+    if(idx === -1) idx = line.indexOf(":");
+
+    if(idx !== -1){
+      let k = line.slice(0,idx).trim();
+      let v = line.slice(idx+1).trim();
+
+      if(k === "账户" || k === "账号" || k === "email"){
+        data.account = v;
+      }
+      else if(k === "演出团体"){
+        data.show = v;
+      }
+      else if(k === "交付日期"){
+        data.delivery_date = v;
+      }
+      else if(k === "cxy"){
+        data.cxy = v;
+      }
+    }
+  });
+
+  return data;
+}
+
+
+/* =======================
+   ➕ 添加（云端）
+======================= */
+async function add(){
+
+  let text = document.getElementById("input").value;
+  if(!text) return;
+
+  let item = parse(text);
+
+  let { error } = await client
+    .from("reports")
+    .insert([item]);
+
+  if(error){
+    alert("生成失败，请检查Supabase配置");
+    console.log(error);
+    return;
+  }
+
+  resetInput();
+  render();
+}
+
+
+/* =======================
+   🗑 删除
+======================= */
+async function del(id){
+
+  await client
+    .from("reports")
+    .delete()
+    .eq("id", id);
+
+  render();
+}
+
+
+/* =======================
+   📋 复制
+======================= */
+function copy(text){
+  navigator.clipboard.writeText(text);
+}
+
+
+/* =======================
+   🔥 排序
+======================= */
+function sortByDate(arr){
+
+  return arr.sort((a,b)=>{
+    let da = new Date(a.delivery_date || "9999-12-31");
+    let db = new Date(b.delivery_date || "9999-12-31");
+    return da - db;
+  });
+}
+
+
+/* =======================
+   📥 渲染（云端）
+======================= */
+async function render(){
+
+  let a = document.getElementById("searchAccount").value || "";
+  let s = document.getElementById("searchShow").value || "";
+
+  let { data, error } = await client
+    .from("reports")
+    .select("*");
+
+  if(error){
+    console.log(error);
+    return;
+  }
+
+  data = data || [];
+
+  let filtered = data.filter(i=>{
+    return (!a || (i.account||"").includes(a))
+        && (!s || (i.show||"").includes(s));
+  });
+
+  filtered = sortByDate(filtered);
+
+  let map = {};
+
+  filtered.forEach(i=>{
+    let acc = i.account || "未填写";
+    if(!map[acc]) map[acc] = [];
+    map[acc].push(i);
+  });
+
+  let html = "";
+
+  for(let acc in map){
+
+    html += `
+      <div class="card">
+
+        <div class="row">
+          <span>账户：${acc}</span>
+          <button onclick="copy('${acc}')">复制</button>
+        </div>
+    `;
+
+    map[acc].forEach(item=>{
+      html += `
+        <div style="border-bottom:1px solid #eee;padding:6px;">
+          <div>演出团体：${item.show || ""}</div>
+          <div>交付日期：${item.delivery_date || ""}</div>
+          <div>cxy：${item.cxy || ""}</div>
+
+          <button onclick="del('${item.id}')">删除</button>
+        </div>
+      `;
+    });
+
+    html += `</div>`;
+  }
+
+  document.getElementById("result").innerHTML = html;
+}
+
+
+/* =======================
+   🧨 清空云端
+======================= */
+async function clearData(){
+
+  if(!confirm("确定清空云端数据吗？")) return;
+
+  let { data } = await client.from("reports").select("id");
+
+  data = data || [];
+
+  for(let i of data){
+    await client.from("reports").delete().eq("id", i.id);
+  }
+
+  render();
+}
+
+
+/* =======================
+   📱 PWA注册
+======================= */
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.register("sw.js");
+}
+
+render();
+
+</script>
+
+</body>
+</html>
